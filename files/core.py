@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -11,25 +12,46 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
+import brand as B
+
+B.verify_integrity()
+
 KEY_PATH = Path("/root/.pg_nodes/api_key")
 CFG_PATH = Path("/root/.pg_nodes/ip-limit.json")
 STATE_PATH = Path("/var/lib/vpn-ip-limit/state.json")
 PANEL_URL_PATH = Path("/root/.pg_nodes/panel_url")
 BOT_LOG_PATH = Path("/var/log/vpn-ip-limit-bot.log")
-SUPPORT = "https://t.me/AZROOT94"
-TITLE = "RoOtIt VPN IP LIMIT"
-VERSION = "1.1.0"
+SUPPORT = B.SUPPORT
+TITLE = B.TITLE
+VERSION = "1.1.1"
 
 
-def _panel_base() -> str:
-    if PANEL_URL_PATH.exists():
-        v = PANEL_URL_PATH.read_text(encoding="utf-8").strip()
-        if v:
-            return v.rstrip("/")
+def _sanitize_panel_url(raw: str) -> str:
+    raw = (raw or "").strip()
+    if not raw:
+        return "http://127.0.0.1:8000"
+    for line in raw.splitlines():
+        line = line.strip()
+        if line.startswith(("http://", "https://")):
+            return line.rstrip("/")
+    if re.fullmatch(r"\d+", raw):
+        return f"http://127.0.0.1:{raw}"
+    if re.fullmatch(r"[\w.-]+:\d+", raw):
+        return f"http://{raw.rstrip('/')}"
     return "http://127.0.0.1:8000"
 
 
-BASE = _panel_base()
+def _panel_base() -> str:
+    if not PANEL_URL_PATH.exists():
+        return "http://127.0.0.1:8000"
+    stored = PANEL_URL_PATH.read_text(encoding="utf-8")
+    url = _sanitize_panel_url(stored)
+    if stored.strip() != url:
+        try:
+            PANEL_URL_PATH.write_text(url + "\n", encoding="utf-8")
+        except OSError:
+            pass
+    return url
 
 
 def load_json(path: Path, default):
@@ -121,11 +143,12 @@ def tail_file(path: Path | str, n: int = 40) -> str:
 
 
 def panel_ping(key: str) -> str:
+    base = _panel_base()
     try:
         api("GET", "/api/system", key=key)
-        return f"OK ({BASE})"
+        return f"OK ({base})"
     except Exception as e:
-        return f"FAIL ({BASE}): {e}"
+        return f"FAIL ({base}): {e}"
 
 
 def diagnostics_report(cfg: dict, key: str) -> str:
@@ -193,7 +216,7 @@ def diagnostics_report(cfg: dict, key: str) -> str:
 def api(method: str, path: str, body: dict | None = None, key: str = ""):
     data = None if body is None else json.dumps(body).encode()
     req = urllib.request.Request(
-        BASE + path,
+        _panel_base() + path,
         data=data,
         method=method,
         headers={"X-API-Key": key, "Content-Type": "application/json"},
@@ -291,7 +314,6 @@ def tg_api(token: str, method: str, payload: dict):
 
 def status_report(cfg: dict, key: str) -> str:
     lines = [
-        f"{TITLE}",
         f"IP Guard: {'ON' if cfg.get('enabled') else 'OFF'} | Timer: {'ON' if timer_active() else 'OFF'} | Mode: {cfg.get('mode')}",
         f"Default IP limit: {cfg.get('default_limit')}",
         f"Exempt users: {', '.join(cfg.get('exempt_usernames') or []) or '-'}",

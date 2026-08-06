@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 """Persian UI for RoOtIt VPN IP LIMIT bot — clear labels."""
-TITLE = "RoOtIt VPN IP LIMIT"
 
 def main_menu_kb():
     return {"inline_keyboard": [
@@ -79,5 +78,5 @@ MSG = {
   "unknown": "گزینه نامعتبر",
   "err": "خطا هنگام اجرای دکمه.\nجزئیات در لاگ ذخیره شد.\nدکمه «گزارش عیب‌یابی» را بزنید و خروجی را برای پشتیبانی بفرستید.\n\n{e}",
   "diag_head": "گزارش عیب‌یابی آماده شد.\nاین متن را برای پشتیبانی بفرستید:\n{support}\n\nروی سرور هم ذخیره شد:\n/tmp/vpn-ip-limit-diag.txt\n/var/log/vpn-ip-limit-bot.log",
-  "welcome": "{title}\nربات: @{bot}\nپشتیبانی: {support}\n\nاین ربات برای مدیریت محدودیت IP همزمان کاربران VPN است.\nرمز ورود ادمین را بفرستید تا منو باز شود.",
+  "welcome": "ربات: @{bot}\nپشتیبانی: {support}\n\nاین ربات برای مدیریت محدودیت IP همزمان کاربران VPN است.\nرمز ورود ادمین را بفرستید تا منو باز شود.",
 }

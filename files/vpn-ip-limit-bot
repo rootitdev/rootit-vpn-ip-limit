@@ -9,8 +9,11 @@ import traceback
 import urllib.error
 
 sys.path.insert(0, "/opt/vpn-ip-limit")
+import brand as B
 import core as C
 import fa_ui as UI
+
+B.verify_integrity()
 
 PENDING = {}
 
@@ -24,7 +27,7 @@ def main_menu_kb():
 
 
 def send(token, chat_id, text, reply_markup=None, edit_id=None):
-    text = text or ""
+    text = B.wrap_message(text or "")
     chunks = []
     while text:
         chunks.append(text[:3500])
@@ -73,9 +76,8 @@ def is_auth(state, chat_id, cfg=None) -> bool:
 def welcome_text(cfg):
     m = UI.MSG["welcome"]
     return m.format(
-        title=C.TITLE,
         bot=(cfg.get("telegram") or {}).get("bot_username") or "mamerootitbot",
-        support=(cfg.get("telegram") or {}).get("support") or C.SUPPORT,
+        support=B.SUPPORT,
     )
 
 
@@ -89,7 +91,7 @@ def handle_text(token, cfg, state, key, chat_id, text: str):
             C.add_authorized_chat(state, chat_id)
             C.save_state(state)
         if is_auth(state, chat_id, cfg):
-            send(token, chat_id, f"{C.TITLE}\n" + M["authorized"].format(support=C.SUPPORT), main_menu_kb())
+            send(token, chat_id, B.authorized_message(), main_menu_kb())
         else:
             send(token, chat_id, welcome_text(cfg))
         return
@@ -99,7 +101,7 @@ def handle_text(token, cfg, state, key, chat_id, text: str):
         if text == pw and pw:
             C.add_authorized_chat(state, chat_id)
             C.save_state(state)
-            send(token, chat_id, M["access_ok"], main_menu_kb())
+            send(token, chat_id, B.authorized_message(), main_menu_kb())
             C.notify_all(cfg, state, f"[{C.TITLE}]\nNew admin authorized.\nchat_id={chat_id}")
         else:
             send(token, chat_id, M["bad_pw"])
@@ -161,7 +163,7 @@ def handle_text(token, cfg, state, key, chat_id, text: str):
         return
 
     if text in ("/menu", "menu", "/help"):
-        send(token, chat_id, f"{C.TITLE}\n{M['choose']}", main_menu_kb())
+        send(token, chat_id, M["choose"], main_menu_kb())
         return
     if text in ("/diag", "diag"):
         _send_diag(token, cfg, key, chat_id)
@@ -171,7 +173,7 @@ def handle_text(token, cfg, state, key, chat_id, text: str):
 
 def _send_diag(token, cfg, key, chat_id):
     M = UI.MSG
-    support = (cfg.get("telegram") or {}).get("support") or C.SUPPORT
+    support = B.SUPPORT
     send(token, chat_id, M["diag_head"].format(support=support))
     report = C.diagnostics_report(cfg, key)
     C.blog(f"DIAG chat={chat_id} bytes={len(report)}")
@@ -299,7 +301,7 @@ def handle_callback(token, cfg, state, key, cq):
             C.notify_all(cfg, state, f"[{C.TITLE}]\nTest OK\nSupport: {C.SUPPORT}")
             send(token, chat_id, M["tg_test_ok"], main_menu_kb())
         elif data == "menu":
-            send(token, chat_id, f"{C.TITLE}\n{M['choose']}", main_menu_kb(), edit_id=mid)
+            send(token, chat_id, M["choose"], main_menu_kb(), edit_id=mid)
         else:
             send(token, chat_id, M["unknown"], main_menu_kb())
     except Exception as e:
@@ -308,6 +310,7 @@ def handle_callback(token, cfg, state, key, cq):
 
 
 def main():
+    B.verify_integrity()
     offset = 0
     C.blog(f"bot starting v{C.VERSION}")
     print("vpn-ip-limit-bot starting", flush=True)

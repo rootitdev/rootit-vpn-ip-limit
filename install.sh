@@ -64,34 +64,51 @@ else
   chmod 600 "$CFG_DIR/api_key"
 fi
 
+# Extract a valid http(s) URL from raw panel_url file content
+sanitize_panel_url() {
+  local raw="$1" line
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line//$'\r'/}"
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    if [[ "$line" == http://* || "$line" == https://* ]]; then
+      echo "${line%/}"
+      return
+    fi
+  done <<< "$raw"
+  if [[ "$raw" =~ ^[0-9]+$ ]]; then
+    echo "http://127.0.0.1:$raw"
+    return
+  fi
+  echo "http://127.0.0.1:8000"
+}
+
 # Panel base URL (ask interactively unless PANEL_URL is already set)
 ask_panel_url() {
   local current="http://127.0.0.1:8000"
   if [[ -f "$CFG_DIR/panel_url" ]]; then
-    current="$(tr -d '\r\n' < "$CFG_DIR/panel_url")"
+    current="$(sanitize_panel_url "$(tr -d '\r' < "$CFG_DIR/panel_url")")"
   fi
   if [[ -n "${PANEL_URL:-}" ]]; then
-    echo "$PANEL_URL"
+    sanitize_panel_url "$PANEL_URL"
     return
   fi
 
-  echo
-  echo "PasarGuard panel address"
-  echo "  Default is 127.0.0.1:8000"
-  echo "  If your panel port is different, enter it below."
-  echo
-  local host port full
+  echo >&2
+  echo >&2 "PasarGuard panel address"
+  echo >&2 "  Default is 127.0.0.1:8000"
+  echo >&2 "  If your panel port is different, enter it below."
+  echo >&2
+  local full
   read -r -p "Panel host [${current#http://}] (or full URL, Enter=keep): " full
   if [[ -z "$full" ]]; then
     echo "$current"
     return
   fi
-  # If user typed only a port number
   if [[ "$full" =~ ^[0-9]+$ ]]; then
     echo "http://127.0.0.1:$full"
     return
   fi
-  # If user typed host:port without scheme
   if [[ "$full" != http://* && "$full" != https://* ]]; then
     echo "http://$full"
     return
@@ -99,7 +116,18 @@ ask_panel_url() {
   echo "$full"
 }
 
+# repair panel_url corrupted by older installers (stdout captured into file)
+if [[ -f "$CFG_DIR/panel_url" ]]; then
+  existing="$(tr -d '\r' < "$CFG_DIR/panel_url")"
+  fixed="$(sanitize_panel_url "$existing")"
+  if [[ "$existing" != "$fixed" ]]; then
+    echo "Repaired panel_url -> $fixed" >&2
+    printf '%s\n' "$fixed" > "$CFG_DIR/panel_url"
+  fi
+fi
+
 PANEL="$(ask_panel_url)"
+PANEL="$(sanitize_panel_url "$PANEL")"
 PANEL="${PANEL%/}"
 echo "Panel API: $PANEL"
 printf '%s\n' "$PANEL" > "$CFG_DIR/panel_url"
@@ -118,6 +146,7 @@ fi
 
 # copy package files
 cp -a "$SCRIPT_DIR/files/core.py" "$PREFIX/core.py"
+cp -a "$SCRIPT_DIR/files/brand.py" "$PREFIX/brand.py"
 cp -a "$SCRIPT_DIR/files/fa_ui.py" "$PREFIX/fa_ui.py"
 cp -a "$SCRIPT_DIR/files/vpn-ip-limit" "$BIN_DIR/vpn-ip-limit"
 cp -a "$SCRIPT_DIR/files/vpn-ip-limit-bot" "$BIN_DIR/vpn-ip-limit-bot"
