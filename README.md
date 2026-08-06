@@ -36,6 +36,16 @@ sudo bash install.sh
 sudo vpn-ip-limit setup
 ```
 
+نصب از شما می‌پرسد:
+- API Key (اگر پیدا نکند)
+- **آدرس/پورت پنل** (مثلاً فقط `2053` یا `127.0.0.1:2053` — Enter = همان قبلی/پیش‌فرض 8000)
+
+بدون سؤال هم می‌شود:
+
+```bash
+PANEL_URL=http://127.0.0.1:2053 sudo -E bash install.sh
+```
+
 در `setup` این‌ها را وارد می‌کنید:
 
 1. Bot Token
@@ -155,6 +165,16 @@ git clone https://github.com/rootitdev/rootit-vpn-ip-limit.git
 cd rootit-vpn-ip-limit
 sudo bash install.sh
 sudo vpn-ip-limit setup
+```
+
+The installer asks for:
+- API Key (if not found)
+- **Panel host/port** (e.g. just `2053` or `127.0.0.1:2053` — Enter keeps previous/default `8000`)
+
+Non-interactive:
+
+```bash
+PANEL_URL=http://127.0.0.1:2053 sudo -E bash install.sh
 ```
 
 `setup` asks for:
