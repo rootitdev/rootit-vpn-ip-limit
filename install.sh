@@ -64,11 +64,57 @@ else
   chmod 600 "$CFG_DIR/api_key"
 fi
 
-# Panel base URL for local API
-PANEL="${PANEL_URL:-http://127.0.0.1:8000}"
+# Panel base URL (ask interactively unless PANEL_URL is already set)
+ask_panel_url() {
+  local current="http://127.0.0.1:8000"
+  if [[ -f "$CFG_DIR/panel_url" ]]; then
+    current="$(tr -d '\r\n' < "$CFG_DIR/panel_url")"
+  fi
+  if [[ -n "${PANEL_URL:-}" ]]; then
+    echo "$PANEL_URL"
+    return
+  fi
+
+  echo
+  echo "PasarGuard panel address"
+  echo "  Default is 127.0.0.1:8000"
+  echo "  If your panel port is different, enter it below."
+  echo
+  local host port full
+  read -r -p "Panel host [${current#http://}] (or full URL, Enter=keep): " full
+  if [[ -z "$full" ]]; then
+    echo "$current"
+    return
+  fi
+  # If user typed only a port number
+  if [[ "$full" =~ ^[0-9]+$ ]]; then
+    echo "http://127.0.0.1:$full"
+    return
+  fi
+  # If user typed host:port without scheme
+  if [[ "$full" != http://* && "$full" != https://* ]]; then
+    echo "http://$full"
+    return
+  fi
+  echo "$full"
+}
+
+PANEL="$(ask_panel_url)"
+PANEL="${PANEL%/}"
 echo "Panel API: $PANEL"
-# write panel url helper for core
 printf '%s\n' "$PANEL" > "$CFG_DIR/panel_url"
+
+# quick connectivity check
+if command -v curl >/dev/null 2>&1; then
+  code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 \
+    -H "X-API-Key: $(cat "$CFG_DIR/api_key")" \
+    "$PANEL/api/system" || true)"
+  if [[ "$code" == "200" ]]; then
+    echo "Panel check: OK ($code)"
+  else
+    echo "Panel check: WARNING http=$code (install continues; fix later with PANEL_URL or re-run install)"
+  fi
+fi
 
 # copy package files
 cp -a "$SCRIPT_DIR/files/core.py" "$PREFIX/core.py"
