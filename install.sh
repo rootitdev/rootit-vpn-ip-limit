@@ -156,34 +156,20 @@ systemctl daemon-reload
 systemctl stop vpn-ip-limit.timer vpn-ip-limit.service 2>/dev/null || true
 systemctl disable vpn-ip-limit.timer 2>/dev/null || true
 
-# patch core to honor panel_url if present
-python3 - <<'PY'
-from pathlib import Path
-p=Path('/opt/vpn-ip-limit/core.py')
-t=p.read_text(encoding='utf-8')
-if 'panel_url' not in t:
-    old='BASE = "http://127.0.0.1:8000"'
-    new='''def _panel_base():
-    p = Path("/root/.pg_nodes/panel_url")
-    if p.exists():
-        v = p.read_text(encoding="utf-8").strip()
-        if v:
-            return v.rstrip("/")
-    return "http://127.0.0.1:8000"
+# bot service: enable and restart so updates apply; keep IP guard off
+systemctl enable vpn-ip-limit-bot.service >/dev/null 2>&1 || true
+systemctl restart vpn-ip-limit-bot.service >/dev/null 2>&1 || true
 
-BASE = _panel_base()'''
-    if old not in t:
-        raise SystemExit('BASE marker missing')
-    p.write_text(t.replace(old,new,1), encoding='utf-8')
-    print('panel_url support added')
-else:
-    print('panel_url already present')
-PY
+# panel_url helper already supported inside core.py v1.1+
+if [[ ! -f "$CFG_DIR/panel_url" ]]; then
+  printf '%s\n' "$PANEL" > "$CFG_DIR/panel_url"
+fi
 
 echo
-echo "Install OK."
-echo "Next: configure Telegram bot"
-echo "  vpn-ip-limit setup"
+echo "Install/Update OK. version files copied."
+echo "Next (first install only): vpn-ip-limit setup"
+echo "Diagnostics: vpn-ip-limit diag"
+echo "Bot log:     /var/log/vpn-ip-limit-bot.log"
 echo
 echo "IP Guard stays OFF until you start it from Telegram menu."
 echo "Support: $SUPPORT"

@@ -64,10 +64,51 @@ sudo vpn-ip-limit setup
 vpn-ip-limit              # راهنما
 vpn-ip-limit status       # فقط گزارش (قطع نمی‌کند)
 vpn-ip-limit setup        # تنظیم / سینک ربات تلگرام
+vpn-ip-limit diag         # گزارش عیب‌یابی کامل
+vpn-ip-limit log          # لاگ عملیات قطع کاربر
+vpn-ip-limit bot-log      # لاگ دکمه‌ها/خطاهای ربات
+vpn-ip-limit update       # آپدیت از پوشه git
 vpn-ip-limit off          # خاموش کردن اجباری محافظ IP
 vpn-ip-limit password     # نمایش رمز ورود ادمین
-vpn-ip-limit log          # نمایش لاگ
 ```
+
+### اگر دکمه‌های تلگرام کار نکرد
+
+1. در ربات بزنید: **گزارش عیب‌یابی (برای پشتیبانی)** یا `/diag`
+2. یا روی سرور:
+
+```bash
+vpn-ip-limit diag
+cat /tmp/vpn-ip-limit-diag.txt
+tail -n 80 /var/log/vpn-ip-limit-bot.log
+```
+
+3. خروجی را برای پشتیبانی بفرستید: https://t.me/AZROOT94
+
+نکته: «اجرای بررسی الان» فقط وقتی کسی را قطع می‌کند که **محافظ IP روشن** باشد.
+
+### آپدیت گرفتن از گیتهاب
+
+**شما (صاحب پروژه):** روی سیستم خودتان کد را عوض کنید، بعد:
+
+```bash
+cd /path/to/rootit-vpn-ip-limit
+git add -A
+git commit -m "شرح تغییرات"
+git push
+```
+
+**دوست / سرورهای نصب‌شده:**
+
+```bash
+cd /root/rootit-vpn-ip-limit   # یا همان جایی که clone کرده‌اند
+git pull
+sudo bash install.sh
+# یا:
+sudo vpn-ip-limit update
+```
+
+تنظیمات (`ip-limit.json` و رمز/توکن) پاک نمی‌شود؛ فقط فایل‌های برنامه عوض می‌شود.
 
 ### فایل‌های تنظیمات
 
@@ -77,6 +118,8 @@ vpn-ip-limit log          # نمایش لاگ
 | `/root/.pg_nodes/ip-limit.json` | محدودیت‌ها + تنظیمات تلگرام |
 | `/var/lib/vpn-ip-limit/state.json` | وضعیت اجرا |
 | `/var/log/vpn-ip-limit.log` | لاگ عملیات |
+| `/var/log/vpn-ip-limit-bot.log` | لاگ دکمه‌ها و خطاهای ربات |
+| `/tmp/vpn-ip-limit-diag.txt` | آخرین گزارش عیب‌یابی |
 
 ### نکات اشتراک با دیگران
 
@@ -142,10 +185,51 @@ Useful buttons:
 vpn-ip-limit              # help
 vpn-ip-limit status       # report only (safe)
 vpn-ip-limit setup        # configure / sync Telegram bot
+vpn-ip-limit diag         # full diagnostics report
+vpn-ip-limit log          # action log
+vpn-ip-limit bot-log      # telegram button / error log
+vpn-ip-limit update       # update from git checkout
 vpn-ip-limit off          # force stop IP Guard
 vpn-ip-limit password     # show access password
-vpn-ip-limit log
 ```
+
+### If Telegram buttons fail
+
+1. Tap **گزارش عیب‌یابی (برای پشتیبانی)** or send `/diag`
+2. Or on the server:
+
+```bash
+vpn-ip-limit diag
+cat /tmp/vpn-ip-limit-diag.txt
+tail -n 80 /var/log/vpn-ip-limit-bot.log
+```
+
+3. Send the output to support: https://t.me/AZROOT94
+
+Note: **اجرای بررسی الان** only disconnects users when **IP Guard is ON**.
+
+### Updating from GitHub
+
+**Maintainer:**
+
+```bash
+cd /path/to/rootit-vpn-ip-limit
+git add -A
+git commit -m "describe change"
+git push
+```
+
+**Installed servers / friends:**
+
+```bash
+cd /root/rootit-vpn-ip-limit
+git pull
+sudo bash install.sh
+# or:
+sudo vpn-ip-limit update
+```
+
+Config (`ip-limit.json`, tokens, password) is preserved.
 
 ### Config files
 
@@ -155,6 +239,8 @@ vpn-ip-limit log
 | `/root/.pg_nodes/ip-limit.json` | Limits + Telegram settings |
 | `/var/lib/vpn-ip-limit/state.json` | Runtime state |
 | `/var/log/vpn-ip-limit.log` | Action log |
+| `/var/log/vpn-ip-limit-bot.log` | Telegram button / error log |
+| `/tmp/vpn-ip-limit-diag.txt` | Last diagnostics dump |
 
 ### Notes for sharing
 
