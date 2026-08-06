@@ -12,11 +12,44 @@ import urllib.request
 sys.path.insert(0, "/opt/vpn-ip-limit")
 import core as C
 
+# Fake placeholders only — never show real saved secrets in prompts
+EXAMPLE_TOKEN = "123456789:AAExampleToken_DoNotUseRealValueHere"
+EXAMPLE_USER = "my_vpn_bot"
+EXAMPLE_ADMIN = "123456789"
+EXAMPLE_PASS = "MySecurePass123"
+
 
 def ask(prompt: str, default: str = "") -> str:
     suffix = f" [{default}]" if default else ""
     val = input(f"{prompt}{suffix}: ").strip()
     return val if val else default
+
+
+def ask_keep(prompt: str, has_existing: bool, example: str = "") -> tuple[str, bool]:
+    """
+    Returns (value, kept_existing).
+    If user presses Enter and existing value exists, keep it without displaying it.
+    """
+    if has_existing:
+        hint = "Enter = keep current (hidden)"
+        if example:
+            hint += f" | example: {example}"
+        val = input(f"{prompt} ({hint}): ").strip()
+        if not val:
+            return "", True
+        return val, False
+    hint = f"example: {example}" if example else ""
+    suffix = f" ({hint})" if hint else ""
+    val = input(f"{prompt}{suffix}: ").strip()
+    return val, False
+
+
+def mask_secret(value: str, keep: int = 4) -> str:
+    if not value:
+        return "(empty)"
+    if len(value) <= keep * 2:
+        return "*" * len(value)
+    return value[:keep] + "..." + value[-keep:]
 
 
 def tg_get_me(token: str) -> dict:
@@ -31,20 +64,26 @@ def tg_get_me(token: str) -> dict:
 def main() -> int:
     print()
     print("=" * 56)
-    print(f"  {C.TITLE} ? SETUP")
+    print(f"  {C.TITLE} — SETUP")
     print(f"  Support: {C.SUPPORT}")
     print("=" * 56)
     print()
-    print("Enter bot details. Friends can run this on their own server too.")
+    print("Enter YOUR bot details (do not reuse someone else's token).")
     print("Leave Admin User ID empty to use shareable password login only.")
+    print("Press Enter on a field to keep the current saved value (not shown).")
     print()
 
     cfg = C.load_cfg()
     tg = cfg.setdefault("telegram", {})
 
-    token = ask("Bot Token", tg.get("bot_token") or "")
+    old_token = (tg.get("bot_token") or "").strip()
+    token, kept_token = ask_keep("Bot Token", bool(old_token), EXAMPLE_TOKEN)
+    if kept_token:
+        token = old_token
+        print(f"  kept current token: {mask_secret(token)}")
     if not token or ":" not in token:
         print("ERROR: invalid bot token")
+        print(f"Expected format like: {EXAMPLE_TOKEN}")
         return 1
 
     print("Validating token...")
@@ -56,29 +95,50 @@ def main() -> int:
 
     auto_username = me.get("username") or ""
     auto_bot_id = str(me.get("id") or "")
-    print(f"OK: @{auto_username} (bot id {auto_bot_id})")
+    print(f"OK: @{auto_username or '-'} (bot id {auto_bot_id})")
 
-    bot_username = ask("Bot Username (without @)", tg.get("bot_username") or auto_username or "")
-    bot_username = bot_username.lstrip("@")
+    old_user = (tg.get("bot_username") or "").strip()
+    suggested = auto_username or old_user
+    bot_username = ask(
+        f"Bot Username without @ (example: {EXAMPLE_USER})",
+        suggested,
+    ).lstrip("@")
+    if not bot_username:
+        print("ERROR: bot username required")
+        return 1
 
-    admin_raw = ask(
-        "Admin Telegram User ID(s), comma-separated (optional)",
-        ",".join(str(x) for x in (tg.get("admin_ids") or [])),
+    old_admins = [str(x) for x in (tg.get("admin_ids") or [])]
+    admin_raw, kept_admins = ask_keep(
+        "Admin Telegram User ID(s), comma-separated, optional",
+        bool(old_admins),
+        EXAMPLE_ADMIN,
     )
-    admin_ids = []
-    for part in admin_raw.split(","):
-        part = part.strip()
-        if not part:
-            continue
-        if not part.lstrip("-").isdigit():
-            print("ERROR: user id must be numeric:", part)
-            return 1
-        admin_ids.append(str(part))
+    if kept_admins:
+        admin_ids = old_admins
+        print(f"  kept current admins: {admin_ids}")
+    else:
+        admin_ids = []
+        for part in admin_raw.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            if not part.lstrip("-").isdigit():
+                print("ERROR: user id must be numeric:", part)
+                print(f"Example: {EXAMPLE_ADMIN}")
+                return 1
+            admin_ids.append(str(part))
 
-    pw = ask("Access password (shared with friends)", tg.get("access_password") or secrets.token_urlsafe(6))
+    old_pw = (tg.get("access_password") or "").strip()
+    pw, kept_pw = ask_keep("Access password (shared with trusted admins)", bool(old_pw), EXAMPLE_PASS)
+    if kept_pw:
+        pw = old_pw
+        print(f"  kept current password: {mask_secret(pw)}")
+    elif not pw:
+        pw = secrets.token_urlsafe(6)
+        print(f"  generated password: {pw}")
+
     support = ask("Support link", tg.get("support") or C.SUPPORT)
 
-    # mode reminder
     print()
     print(f"Current IP guard mode: {cfg.get('mode')} (disable = stay off until manual enable)")
     print(f"IP guard enabled now: {cfg.get('enabled')} (will NOT auto-start guard)")
@@ -101,18 +161,15 @@ def main() -> int:
         }
     )
     cfg["telegram"] = tg
-    # never force-enable IP guard from setup
     C.save_cfg(cfg)
 
     state = C.load_state()
-    # seed authorized chats with admin ids (private chat id == user id)
     chats = set(C.authorized_chats(state))
     for aid in admin_ids:
         chats.add(str(aid))
     state["authorized_chats"] = sorted(chats)
     C.save_state(state)
 
-    # delete webhook + restart bot service
     try:
         print(C.tg_api(token, "deleteWebhook", {"drop_pending_updates": True}))
     except Exception as e:
@@ -125,6 +182,7 @@ def main() -> int:
         return 1
 
     import time
+
     time.sleep(1)
     active = os.system("systemctl is-active --quiet vpn-ip-limit-bot.service") == 0
 
@@ -134,8 +192,9 @@ def main() -> int:
     print("=" * 56)
     print(f"  Bot       : @{bot_username}")
     print(f"  Bot ID    : {auto_bot_id}")
-    print(f"  Admins    : {admin_ids or '(none ? password only)'}")
+    print(f"  Admins    : {admin_ids or '(none — password only)'}")
     print(f"  Password  : {pw}")
+    print(f"  Token     : {mask_secret(token)}")
     print(f"  Service   : {'ACTIVE' if active else 'INACTIVE'}")
     print(f"  IP Guard  : {'ON' if cfg.get('enabled') else 'OFF'} (unchanged by setup)")
     print()
