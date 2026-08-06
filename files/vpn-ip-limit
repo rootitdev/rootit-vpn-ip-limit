@@ -1,0 +1,46 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+import sys
+sys.path.insert(0, "/opt/vpn-ip-limit")
+import core as C
+
+def main():
+    arg = sys.argv[1] if len(sys.argv) > 1 else "help"
+    key = C.get_key()
+    cfg = C.load_cfg()
+    state = C.load_state()
+    tg = cfg.get("telegram") or {}
+
+    if arg in ("status", "s"):
+        print(C.status_report(cfg, key)); return 0
+    if arg == "off":
+        cfg["enabled"]=False; C.save_cfg(cfg); C.service_disable(); print("Guard OFF"); return 0
+    if arg == "run":
+        actions=C.run_once(cfg,state,key); C.save_state(state); print("\n".join(actions) if actions else "no actions"); return 0
+    if arg == "password":
+        print(tg.get("access_password") or ""); return 0
+    if arg == "setup":
+        import os; return os.system("/usr/local/bin/vpn-ip-limit-setup") >> 8
+    if arg == "log":
+        print(C.tail_log(cfg, int(sys.argv[2]) if len(sys.argv)>2 else 50)); return 0
+
+    print(f"{C.TITLE}")
+    print(f"Support : {tg.get('support') or C.SUPPORT}")
+    print(f"Bot     : @{tg.get('bot_username') or '-'}")
+    print(f"Bot ID  : {tg.get('bot_id') or '-'}")
+    print(f"Admins  : {tg.get('admin_ids') or []}")
+    print(f"Password: {tg.get('access_password') or '-'}")
+    print()
+    print("Setup / sync Telegram bot (token, user id, bot id):")
+    print("  vpn-ip-limit setup")
+    print("  # or: vpn-ip-limit-setup")
+    print()
+    print("Other:")
+    print("  vpn-ip-limit status")
+    print("  vpn-ip-limit off")
+    print("  vpn-ip-limit password")
+    print("  vpn-ip-limit log")
+    return 0
+
+if __name__ == '__main__':
+    raise SystemExit(main())

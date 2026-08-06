@@ -1,0 +1,241 @@
+# -*- coding: utf-8 -*-
+"""Telegram interactive admin bot — Persian UI."""
+from __future__ import annotations
+import json, sys, time, traceback, urllib.error
+sys.path.insert(0, "/opt/vpn-ip-limit")
+import core as C
+import fa_ui as UI
+
+PENDING = {}
+
+def kb(rows):
+    return {"inline_keyboard": rows}
+
+def main_menu_kb():
+    return UI.main_menu_kb()
+
+def send(token, chat_id, text, reply_markup=None, edit_id=None):
+    payload = {"chat_id": chat_id, "text": text[:4000], "disable_web_page_preview": True}
+    if reply_markup is not None:
+        payload["reply_markup"] = reply_markup
+    if edit_id:
+        payload["message_id"] = edit_id
+        try:
+            return C.tg_api(token, "editMessageText", payload)
+        except Exception:
+            payload.pop("message_id", None)
+    return C.tg_api(token, "sendMessage", payload)
+
+def answer(token, cq_id, text=None):
+    payload = {"callback_query_id": cq_id}
+    if text:
+        payload["text"] = text[:180]
+    try:
+        C.tg_api(token, "answerCallbackQuery", payload)
+    except Exception:
+        pass
+
+def is_auth(state, chat_id, cfg=None) -> bool:
+    if str(chat_id) in C.authorized_chats(state):
+        return True
+    if cfg is None:
+        return False
+    admins = [str(x) for x in ((cfg.get("telegram") or {}).get("admin_ids") or [])]
+    return str(chat_id) in admins
+
+def welcome_text(cfg):
+    m = UI.MSG["welcome"]
+    return m.format(
+        title=C.TITLE,
+        bot=(cfg.get("telegram") or {}).get("bot_username") or "mamerootitbot",
+        support=(cfg.get("telegram") or {}).get("support") or C.SUPPORT,
+    )
+
+def handle_text(token, cfg, state, key, chat_id, text: str):
+    text = (text or "").strip()
+    M = UI.MSG
+    if text.startswith("/start"):
+        admins = [str(x) for x in ((cfg.get("telegram") or {}).get("admin_ids") or [])]
+        if str(chat_id) in admins:
+            C.add_authorized_chat(state, chat_id)
+            C.save_state(state)
+        if is_auth(state, chat_id, cfg):
+            send(token, chat_id, f"{C.TITLE}\n" + M["authorized"].format(support=C.SUPPORT), main_menu_kb())
+        else:
+            send(token, chat_id, welcome_text(cfg))
+        return
+
+    if not is_auth(state, chat_id, cfg):
+        pw = (cfg.get("telegram") or {}).get("access_password") or ""
+        if text == pw and pw:
+            C.add_authorized_chat(state, chat_id)
+            C.save_state(state)
+            send(token, chat_id, M["access_ok"], main_menu_kb())
+            C.notify_all(cfg, state, f"[{C.TITLE}]\nNew admin authorized.\nchat_id={chat_id}")
+        else:
+            send(token, chat_id, M["bad_pw"])
+        return
+
+    pend = PENDING.get(str(chat_id))
+    if pend:
+        action = pend.get("action")
+        PENDING.pop(str(chat_id), None)
+        try:
+            if action == "setlim":
+                parts = text.split()
+                if len(parts) != 2:
+                    send(token, chat_id, M["setlim_fmt"], main_menu_kb()); return
+                user, lim = parts[0], int(parts[1])
+                C.set_user_fields(key, user, {"hwid_limit": lim})
+                send(token, chat_id, M["setlim_ok"].format(user=user, lim=lim), main_menu_kb())
+            elif action == "enuser":
+                C.set_user_fields(key, text, {"status": "active"})
+                state.get("disabled_by_script", {}).pop(text, None)
+                state.get("punished", {}).pop(text, None)
+                C.save_state(state)
+                send(token, chat_id, M["en_ok"].format(user=text), main_menu_kb())
+                C.notify_all(cfg, state, f"[{C.TITLE}]\nEnabled: {text}")
+            elif action == "disuser":
+                C.set_user_fields(key, text, {"status": "disabled"})
+                send(token, chat_id, M["dis_ok"].format(user=text), main_menu_kb())
+                C.notify_all(cfg, state, f"[{C.TITLE}]\nDisabled: {text}")
+            elif action == "deflim":
+                cfg["default_limit"] = int(text)
+                C.save_cfg(cfg)
+                send(token, chat_id, M["deflim_ok"].format(val=cfg["default_limit"]), main_menu_kb())
+            elif action == "exempt_add":
+                ex = list(cfg.get("exempt_usernames") or [])
+                if text not in ex: ex.append(text)
+                cfg["exempt_usernames"] = ex; C.save_cfg(cfg)
+                send(token, chat_id, M["exempt_ok"].format(ex=ex), main_menu_kb())
+            elif action == "exempt_del":
+                ex = list(cfg.get("exempt_usernames") or [])
+                if text in ex: ex.remove(text)
+                cfg["exempt_usernames"] = ex; C.save_cfg(cfg)
+                send(token, chat_id, M["exempt_ok"].format(ex=ex), main_menu_kb())
+            elif action == "setpw":
+                cfg.setdefault("telegram", {})["access_password"] = text
+                C.save_cfg(cfg)
+                state["authorized_chats"] = [str(chat_id)]
+                C.save_state(state)
+                send(token, chat_id, M["pw_updated"], main_menu_kb())
+            else:
+                send(token, chat_id, M["unknown"], main_menu_kb())
+        except Exception as e:
+            send(token, chat_id, M["err"].format(e=e), main_menu_kb())
+        return
+
+    if text in ("/menu", "menu", "/help"):
+        send(token, chat_id, f"{C.TITLE}\n{M['choose']}", main_menu_kb()); return
+    send(token, chat_id, M["use_menu"], main_menu_kb())
+
+def handle_callback(token, cfg, state, key, cq):
+    chat_id = cq["message"]["chat"]["id"]
+    mid = cq["message"]["message_id"]
+    data = cq.get("data") or ""
+    cq_id = cq["id"]
+    M = UI.MSG
+    if not is_auth(state, chat_id, cfg):
+        answer(token, cq_id, M["not_auth"]); send(token, chat_id, welcome_text(cfg)); return
+    answer(token, cq_id)
+
+    if data == "status":
+        send(token, chat_id, C.status_report(cfg, key), main_menu_kb(), edit_id=mid)
+    elif data == "over":
+        rep = C.status_report(cfg, key)
+        overs = [ln for ln in rep.splitlines() if ln.startswith("OVER")]
+        body = "\n".join(overs) if overs else M["over_none"]
+        send(token, chat_id, M["over_title"].format(body=body), main_menu_kb(), edit_id=mid)
+    elif data == "setlim":
+        PENDING[str(chat_id)] = {"action": "setlim"}; send(token, chat_id, M["setlim_ask"])
+    elif data == "enuser":
+        PENDING[str(chat_id)] = {"action": "enuser"}; send(token, chat_id, M["en_ask"])
+    elif data == "disuser":
+        PENDING[str(chat_id)] = {"action": "disuser"}; send(token, chat_id, M["dis_ask"])
+    elif data == "deflim":
+        PENDING[str(chat_id)] = {"action": "deflim"}; send(token, chat_id, M["deflim_ask"].format(cur=cfg.get("default_limit")))
+    elif data == "guard_on":
+        send(token, chat_id, M["guard_warn"], kb([
+            [{"text": M["guard_yes"], "callback_data": "guard_on_yes"}],
+            [{"text": M["cancel"], "callback_data": "menu"}],
+        ]))
+    elif data == "guard_on_yes":
+        cfg["enabled"] = True; C.save_cfg(cfg); C.service_enable()
+        C.notify_all(cfg, state, f"[{C.TITLE}]\nGuard STARTED by chat {chat_id}")
+        send(token, chat_id, M["guard_on"], main_menu_kb())
+    elif data == "guard_off":
+        cfg["enabled"] = False; C.save_cfg(cfg); C.service_disable()
+        C.notify_all(cfg, state, f"[{C.TITLE}]\nGuard STOPPED by chat {chat_id}")
+        send(token, chat_id, M["guard_off"], main_menu_kb())
+    elif data == "logs":
+        send(token, chat_id, C.tail_log(cfg, 25), main_menu_kb())
+    elif data == "runonce":
+        if not cfg.get("enabled"):
+            send(token, chat_id, M["guard_is_off"], main_menu_kb())
+        else:
+            actions = C.run_once(cfg, state, key); C.save_state(state)
+            body = "\n".join(actions) if actions else M["no_actions"]
+            send(token, chat_id, M["run_done"].format(body=body), main_menu_kb())
+    elif data == "exempt":
+        send(token, chat_id, M["exempt_now"].format(ex=cfg.get("exempt_usernames")), kb([
+            [{"text": M["exempt_add_btn"], "callback_data": "exempt_add"}],
+            [{"text": M["exempt_del_btn"], "callback_data": "exempt_del"}],
+            [{"text": M["back"], "callback_data": "menu"}],
+        ]))
+    elif data == "exempt_add":
+        PENDING[str(chat_id)] = {"action": "exempt_add"}; send(token, chat_id, M["exempt_add_ask"])
+    elif data == "exempt_del":
+        PENDING[str(chat_id)] = {"action": "exempt_del"}; send(token, chat_id, M["exempt_del_ask"])
+    elif data == "pwinfo":
+        pw = (cfg.get("telegram") or {}).get("access_password") or ""
+        n = len(C.authorized_chats(state))
+        bot = (cfg.get("telegram") or {}).get("bot_username")
+        send(token, chat_id, M["pw_info"].format(pw=pw, n=n, bot=bot), kb([
+            [{"text": M["pw_change"], "callback_data": "setpw"}],
+            [{"text": M["pw_revoke"], "callback_data": "revoke"}],
+            [{"text": M["back"], "callback_data": "menu"}],
+        ]))
+    elif data == "setpw":
+        PENDING[str(chat_id)] = {"action": "setpw"}; send(token, chat_id, M["pw_ask"])
+    elif data == "revoke":
+        state["authorized_chats"] = [str(chat_id)]; C.save_state(state)
+        send(token, chat_id, M["revoked"], main_menu_kb())
+    elif data == "tgtest":
+        C.notify_all(cfg, state, f"[{C.TITLE}]\nTest OK\nSupport: {C.SUPPORT}")
+        send(token, chat_id, M["tg_test_ok"], main_menu_kb())
+    elif data == "menu":
+        send(token, chat_id, f"{C.TITLE}\n{M['choose']}", main_menu_kb(), edit_id=mid)
+    else:
+        send(token, chat_id, M["unknown"], main_menu_kb())
+
+def main():
+    offset = 0
+    print("vpn-ip-limit-bot starting", flush=True)
+    while True:
+        try:
+            cfg = C.load_cfg(); state = C.load_state(); key = C.get_key()
+            token = (cfg.get("telegram") or {}).get("bot_token") or ""
+            if not token:
+                time.sleep(5); continue
+            try:
+                data = C.tg_api(token, "getUpdates", {"timeout": 25, "offset": offset, "allowed_updates": ["message", "callback_query"]})
+            except urllib.error.HTTPError as e:
+                print("getUpdates HTTP", e, flush=True); time.sleep(3); continue
+            for upd in data.get("result") or []:
+                offset = max(offset, upd["update_id"] + 1)
+                try:
+                    if "callback_query" in upd:
+                        handle_callback(token, cfg, state, key, upd["callback_query"])
+                    elif "message" in upd:
+                        msg = upd["message"]
+                        handle_text(token, cfg, state, key, msg["chat"]["id"], msg.get("text") or "")
+                    C.save_state(state)
+                except Exception:
+                    traceback.print_exc()
+        except KeyboardInterrupt:
+            break
+        except Exception:
+            traceback.print_exc(); time.sleep(2)
+
+if __name__ == "__main__":
+    main()

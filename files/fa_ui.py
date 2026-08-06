@@ -1,0 +1,79 @@
+# -*- coding: utf-8 -*-
+"""Persian UI for RoOtIt VPN IP LIMIT bot — clear labels."""
+TITLE = "RoOtIt VPN IP LIMIT"
+
+def main_menu_kb():
+    return {"inline_keyboard": [
+        [
+            {"text": "وضعیت کاربران و IPها", "callback_data": "status"},
+            {"text": "کاربران بیش‌ازحد IP", "callback_data": "over"},
+        ],
+        [
+            {"text": "تنظیم حد IP کاربر", "callback_data": "setlim"},
+            {"text": "حد IP پیش‌فرض همه", "callback_data": "deflim"},
+        ],
+        [
+            {"text": "فعال کردن کاربر VPN", "callback_data": "enuser"},
+            {"text": "غیرفعال کردن کاربر VPN", "callback_data": "disuser"},
+        ],
+        [
+            {"text": "روشن کردن محافظ IP", "callback_data": "guard_on"},
+            {"text": "خاموش کردن محافظ IP", "callback_data": "guard_off"},
+        ],
+        [
+            {"text": "نمایش لاگ‌ها", "callback_data": "logs"},
+            {"text": "اجرای بررسی الان", "callback_data": "runonce"},
+        ],
+        [
+            {"text": "کاربران معاف از محدودیت", "callback_data": "exempt"},
+            {"text": "رمز ورود ادمین", "callback_data": "pwinfo"},
+        ],
+        [
+            {"text": "تست اعلان تلگرام", "callback_data": "tgtest"},
+        ],
+    ]}
+
+MSG = {
+  "authorized": "دسترسی ادمین تأیید شد.\nپشتیبانی: {support}",
+  "access_ok": "دسترسی ادمین فعال شد.\nمی‌توانید ربات و رمز را به ادمین‌های مورد اعتماد بدهید.",
+  "bad_pw": "رمز اشتباه است.\nابتدا /start بزنید و بعد رمز ورود ادمین را بفرستید.",
+  "choose": "یک گزینه را انتخاب کنید:",
+  "use_menu": "از دکمه‌های منو استفاده کنید.\n/menu",
+  "setlim_ask": "برای تنظیم حد IP همزمان یک کاربر بفرستید:\nUSERNAME LIMIT\nمثال:\nKhodai 2\n(0 = نامحدود)",
+  "setlim_fmt": "فرمت اشتباه است.\nUSERNAME LIMIT\nمثال:\nKhodai 2",
+  "setlim_ok": "حد IP کاربر «{user}» = {lim}",
+  "en_ask": "نام کاربری VPN که باید فعال شود را بفرستید:\nمثال: Khodai",
+  "en_ok": "کاربر VPN «{user}» فعال شد",
+  "dis_ask": "نام کاربری VPN که باید غیرفعال شود را بفرستید:\nمثال: Khodai",
+  "dis_ok": "کاربر VPN «{user}» غیرفعال شد",
+  "deflim_ask": "حد IP پیش‌فرض فعلی برای کاربرانی که حد اختصاصی ندارند: {cur}\nعدد جدید را بفرستید:",
+  "deflim_ok": "حد IP پیش‌فرض همه = {val}",
+  "guard_warn": "هشدار\nمحافظ IP روشن شود؟\nاگر کاربری بیش از حد IP همزمان داشته باشد، اکانت VPN او غیرفعال می‌ماند تا خودتان فعالش کنید.",
+  "guard_yes": "بله، محافظ IP را روشن کن",
+  "cancel": "انصراف",
+  "guard_on": "محافظ IP روشن شد",
+  "guard_off": "محافظ IP خاموش شد",
+  "guard_is_off": "محافظ IP خاموش است.\nاول «روشن کردن محافظ IP» را بزنید.",
+  "run_done": "بررسی الان انجام شد.\n{body}",
+  "no_actions": "موردی برای قطع وجود نداشت.",
+  "over_title": "کاربران بیش‌ازحد IP:\n{body}",
+  "over_none": "موردی نیست",
+  "exempt_now": "کاربران معاف از محدودیت IP:\n{ex}",
+  "exempt_add_btn": "افزودن کاربر معاف",
+  "exempt_del_btn": "حذف کاربر معاف",
+  "back": "بازگشت به منو",
+  "exempt_add_ask": "نام کاربری VPN برای معاف شدن از محدودیت را بفرستید:",
+  "exempt_del_ask": "نام کاربری VPN برای حذف از لیست معاف را بفرستید:",
+  "exempt_ok": "لیست معاف به‌روز شد:\n{ex}",
+  "pw_info": "رمز ورود ادمین: `{pw}`\nتعداد ادمین فعال: {n}\n\nربات @{bot} و این رمز را فقط به افراد مورد اعتماد بدهید.",
+  "pw_change": "تغییر رمز ورود ادمین",
+  "pw_revoke": "قطع دسترسی بقیه ادمین‌ها",
+  "pw_ask": "رمز ورود ادمین جدید را بفرستید:",
+  "pw_updated": "رمز عوض شد و نشست‌های دیگر قطع شد.",
+  "revoked": "دسترسی بقیه ادمین‌ها قطع شد. فقط شما مانده‌اید.",
+  "tg_test_ok": "پیام تست برای همه ادمین‌های فعال ارسال شد.",
+  "not_auth": "دسترسی ادمین ندارید",
+  "unknown": "گزینه نامعتبر",
+  "err": "خطا: {e}",
+  "welcome": "{title}\nربات: @{bot}\nپشتیبانی: {support}\n\nاین ربات برای مدیریت محدودیت IP همزمان کاربران VPN است.\nرمز ورود ادمین را بفرستید تا منو باز شود.",
+}
