@@ -23,7 +23,7 @@ PANEL_URL_PATH = Path("/root/.pg_nodes/panel_url")
 BOT_LOG_PATH = Path("/var/log/vpn-ip-limit-bot.log")
 SUPPORT = B.SUPPORT
 TITLE = B.TITLE
-VERSION = "1.1.1"
+VERSION = "1.1.3"
 
 
 def _sanitize_panel_url(raw: str) -> str:
@@ -105,7 +105,35 @@ def save_state(state: dict) -> None:
 
 
 def get_key() -> str:
-    return KEY_PATH.read_text(encoding="utf-8").strip()
+    raw = KEY_PATH.read_text(encoding="utf-8").strip()
+    # recover if file was polluted (e.g. "sudo vpn-ip-limit setuppg_key_...")
+    m = re.search(r"(pg_key_[0-9a-fA-F-]+|[0-9a-fA-F]{8,}(?:-[0-9a-fA-F]+)*)", raw)
+    if m:
+        key = m.group(1)
+        if key != raw:
+            try:
+                KEY_PATH.write_text(key + "\n", encoding="utf-8")
+                KEY_PATH.chmod(0o600)
+            except OSError:
+                pass
+        return key
+    # last token if junk was prepended on same line
+    parts = raw.split()
+    if parts:
+        return parts[-1]
+    raise RuntimeError(f"empty API key in {KEY_PATH}")
+
+
+def _ssl_context_for(url: str):
+    if not url.lower().startswith("https://"):
+        return None
+    import ssl
+
+    # Local/panel HTTPS often has cert for domain, not 127.0.0.1 — skip verify.
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
 
 
 def log(msg: str, cfg: dict | None = None) -> None:
@@ -142,13 +170,47 @@ def tail_file(path: Path | str, n: int = 40) -> str:
         return f"(read error) {e}"
 
 
-def panel_ping(key: str) -> str:
+def panel_ping(key: str) -> tuple[bool, str, str]:
+    """Returns (ok, url, short_error_or_empty)."""
     base = _panel_base()
     try:
         api("GET", "/api/system", key=key)
-        return f"OK ({base})"
+        return True, base, ""
     except Exception as e:
-        return f"FAIL ({base}): {e}"
+        return False, base, str(e).strip() or type(e).__name__
+
+
+def _panel_hint(url: str, err: str) -> list[str]:
+    err_l = (err or "").lower()
+    hints = [
+        "احتمال‌ها و کارهایی که باید چک کنید:",
+        f"• آدرس فعلی پنل: {url}",
+        "• اگر پنل HTTPS است، آدرس باید با https:// شروع شود",
+        "• پورت را درست وارد کنید (مثلاً 8000 نه 2087 مگر واقعاً همان باشد)",
+        "• API Key پنل را دوباره در /root/.pg_nodes/api_key بررسی کنید",
+        "• روی سرور تست کنید:",
+        f"  curl -sS -o /dev/null -w '%{{http_code}}' -H \"X-API-Key: $(cat /root/.pg_nodes/api_key)\" {url}/api/system",
+        "• بعد از اصلاح:",
+        "  echo 'http://127.0.0.1:PORT' > /root/.pg_nodes/panel_url",
+        "  systemctl restart vpn-ip-limit-bot",
+    ]
+    if "ssl" in err_l or "certificate" in err_l:
+        hints.insert(1, "• خطای SSL: احتمالاً باید http را به https عوض کنید (یا برعکس)")
+    if "refused" in err_l:
+        hints.insert(1, "• اتصال رد شد: پنل روی این پورت روشن نیست")
+    if "closed connection" in err_l or "remotedisconnected" in err_l:
+        hints.insert(1, "• اتصال قطع شد: اغلب پورت/پروتکل اشتباه است (http روی پورت https یا برعکس)")
+    if "unknown url type" in err_l or "illegal" in err_l:
+        hints.insert(1, "• آدرس پنل خراب است؛ فایل panel_url را اصلاح کنید")
+    return hints
+
+
+def _short_errors(text: str, max_lines: int = 8) -> list[str]:
+    lines = [ln.rstrip() for ln in (text or "").splitlines() if ln.strip()]
+    errs = [ln for ln in lines if any(k in ln for k in ("ERR", "Error", "Traceback", "FAIL", "CB_ERR", "Exception", "RemoteDisconnected", "URLError"))]
+    if not errs:
+        errs = lines[-max_lines:]
+    return errs[-max_lines:]
 
 
 def diagnostics_report(cfg: dict, key: str) -> str:
@@ -156,58 +218,139 @@ def diagnostics_report(cfg: dict, key: str) -> str:
 
     state = load_state()
     tg = cfg.get("telegram") or {}
-    lines = [
-        f"{TITLE} diagnostics v{VERSION}",
-        f"time_utc: {datetime.now(timezone.utc).isoformat()}",
-        f"panel: {panel_ping(key)}",
-        f"api_key_file: {'YES' if KEY_PATH.exists() else 'NO'} ({KEY_PATH})",
-        f"config_file: {'YES' if CFG_PATH.exists() else 'NO'}",
-        f"ip_guard_enabled: {cfg.get('enabled')}",
-        f"ip_guard_timer: {'ON' if timer_active() else 'OFF'}",
-        f"mode: {cfg.get('mode')}",
-        f"default_limit: {cfg.get('default_limit')}",
-        f"bot_username: @{tg.get('bot_username') or '-'}",
-        f"bot_token_set: {'YES' if tg.get('bot_token') else 'NO'}",
-        f"admin_ids: {tg.get('admin_ids') or []}",
-        f"authorized_chats: {authorized_chats(state)}",
-        "",
-        "--- systemd bot ---",
-    ]
+    panel_ok, panel_url, panel_err = panel_ping(key)
+    key_ok = KEY_PATH.exists()
+    cfg_ok = CFG_PATH.exists()
+    guard_on = bool(cfg.get("enabled"))
+    timer_on = timer_active()
     try:
-        out = subprocess.check_output(
+        bot_svc = subprocess.check_output(
             ["systemctl", "is-active", "vpn-ip-limit-bot.service"],
             stderr=subprocess.STDOUT,
             text=True,
             timeout=5,
         ).strip()
     except Exception as e:
-        out = f"error: {e}"
-    lines.append(f"vpn-ip-limit-bot: {out}")
-    try:
-        j = subprocess.check_output(
-            ["journalctl", "-u", "vpn-ip-limit-bot.service", "-n", "30", "--no-pager"],
-            stderr=subprocess.STDOUT,
-            text=True,
-            timeout=10,
-        )
-        lines += ["", "--- journalctl bot (last 30) ---", j.strip() or "(empty)"]
-    except Exception as e:
-        lines += ["", f"--- journalctl bot ---\nerror: {e}"]
-    lines += ["", "--- bot log (last 50) ---", tail_file(BOT_LOG_PATH, 50)]
+        bot_svc = f"error ({e})"
+    bot_ok = bot_svc == "active"
+    token_ok = bool((tg.get("bot_token") or "").strip())
+
+    status_ok = False
+    status_note = ""
+    if panel_ok:
+        try:
+            status_report(cfg, key)
+            status_ok = True
+            status_note = "خواندن لیست کاربران و IPها موفق بود"
+        except Exception as e:
+            status_note = str(e).strip() or type(e).__name__
+    else:
+        status_note = "به‌خاطر قطع بودن پنل قابل تست نیست"
+
+    problems = []
+    if not panel_ok:
+        problems.append("اتصال به پنل PasarGuard برقرار نیست")
+    if not key_ok:
+        problems.append("فایل API Key پیدا نشد")
+    if not cfg_ok:
+        problems.append("فایل تنظیمات پیدا نشد")
+    if not bot_ok:
+        problems.append(f"سرویس ربات فعال نیست ({bot_svc})")
+    if not token_ok:
+        problems.append("توکن ربات تنظیم نشده")
+    if panel_ok and not status_ok:
+        problems.append("خواندن وضعیت کاربران از پنل شکست خورد")
+
+    if not problems:
+        summary = "✅ همه چیز ظاهراً سالم است"
+    elif len(problems) == 1 and not panel_ok:
+        summary = "❌ مشکل اصلی: پنل در دسترس نیست"
+    else:
+        summary = f"❌ {len(problems)} مورد نیاز به بررسی دارد"
+
+    mode = cfg.get("mode") or "disable"
+    mode_fa = "قطع کامل تا فعال‌سازی دستی" if mode == "disable" else f"موقت ({mode})"
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    lines = [
+        f"گزارش عیب‌یابی v{VERSION}",
+        f"زمان: {now}",
+        "",
+        "—— خلاصه ——",
+        summary,
+    ]
+    for p in problems:
+        lines.append(f"• {p}")
+
     lines += [
         "",
-        "--- action log (last 30) ---",
-        tail_file(cfg.get("log_file") or "/var/log/vpn-ip-limit.log", 30),
+        "—— وضعیت ——",
+        f"پنل:           {'✅ وصل' if panel_ok else '❌ قطع'}",
+        f"آدرس پنل:      {panel_url}",
+        f"API Key:       {'✅ هست' if key_ok else '❌ نیست'}",
+        f"تنظیمات:       {'✅ هست' if cfg_ok else '❌ نیست'}",
+        f"ربات تلگرام:   {'✅ فعال' if bot_ok else '❌ ' + bot_svc}",
+        f"توکن ربات:     {'✅ تنظیم شده' if token_ok else '❌ خالی'}",
+        f"محافظ IP:      {'🟢 روشن' if guard_on else '⚪ خاموش'}",
+        f"تایمر بررسی:   {'🟢 روشن' if timer_on else '⚪ خاموش'}",
+        f"حالت تنبیه:    {mode_fa}",
+        f"حد پیش‌فرض IP: {cfg.get('default_limit')}",
+        f"ربات:          @{tg.get('bot_username') or '-'}",
+        f"ادمین‌ها:      {tg.get('admin_ids') or []}",
+        f"نشست فعال:     {authorized_chats(state)}",
+        f"تست کاربران:   {'✅ ' + status_note if status_ok else '❌ ' + status_note}",
     ]
-    lines.append("")
-    lines.append("--- status_report probe ---")
-    try:
-        lines.append(status_report(cfg, key)[:1500])
-    except Exception as e:
-        lines.append(f"status_report FAIL: {e}")
+
+    if not panel_ok:
+        lines += ["", "—— راهنمای رفع مشکل پنل ——"]
+        lines += _panel_hint(panel_url, panel_err)
+        if panel_err:
+            lines += ["", f"خطای کوتاه: {panel_err[:300]}"]
+
+    # compact recent errors (no huge traceback dump in Telegram)
+    bot_tail = tail_file(BOT_LOG_PATH, 80)
+    act_path = cfg.get("log_file") or "/var/log/vpn-ip-limit.log"
+    act_tail = tail_file(act_path, 40)
+    short = _short_errors(bot_tail, 6)
+    if short:
+        lines += ["", "—— آخرین خطاهای ربات (کوتاه) ——"]
+        lines.extend(short)
+
+    act_lines = [ln for ln in act_tail.splitlines() if ln.strip() and not ln.startswith("(missing)")]
+    if act_lines:
+        lines += ["", "—— آخرین عملیات محافظ (حداکثر ۱۰ خط) ——"]
+        lines.extend(act_lines[-10:])
+    elif "(missing)" in act_tail:
+        lines += ["", "—— لاگ عملیات ——", "هنوز فایلی ساخته نشده (محافظ هنوز عملی انجام نداده)"]
+
+    lines += [
+        "",
+        "—— فایل‌های سرور ——",
+        "/tmp/vpn-ip-limit-diag.txt",
+        "/var/log/vpn-ip-limit-bot.log",
+        str(act_path),
+        f"پشتیبانی: {SUPPORT}",
+    ]
+
     text = "\n".join(lines)
+    # full technical dump only on disk for support
+    full = "\n".join(
+        [
+            text,
+            "",
+            "======== RAW (for support) ========",
+            f"panel_ok={panel_ok} url={panel_url} err={panel_err}",
+            f"bot_service={bot_svc}",
+            "",
+            "--- bot log last 40 ---",
+            "\n".join(bot_tail.splitlines()[-40:]),
+            "",
+            "--- action log last 30 ---",
+            "\n".join(act_tail.splitlines()[-30:]),
+        ]
+    )
     try:
-        Path("/tmp/vpn-ip-limit-diag.txt").write_text(text, encoding="utf-8")
+        Path("/tmp/vpn-ip-limit-diag.txt").write_text(full, encoding="utf-8")
     except OSError:
         pass
     return text
@@ -215,13 +358,14 @@ def diagnostics_report(cfg: dict, key: str) -> str:
 
 def api(method: str, path: str, body: dict | None = None, key: str = ""):
     data = None if body is None else json.dumps(body).encode()
+    url = _panel_base() + path
     req = urllib.request.Request(
-        _panel_base() + path,
+        url,
         data=data,
         method=method,
         headers={"X-API-Key": key, "Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=30) as r:
+    with urllib.request.urlopen(req, timeout=30, context=_ssl_context_for(url)) as r:
         raw = r.read()
         return json.loads(raw) if raw else {}
 

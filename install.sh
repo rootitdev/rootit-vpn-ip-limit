@@ -28,6 +28,28 @@ detect_api_key() {
   return 1
 }
 
+# Fix polluted api_key files (e.g. "sudo vpn-ip-limit setuppg_key_...")
+sanitize_api_key_file() {
+  local f="$1" raw key
+  [[ -f "$f" ]] || return 0
+  raw="$(tr -d '\r' < "$f" | tr -d '\n')"
+  if [[ "$raw" =~ (pg_key_[0-9a-fA-F-]+) ]]; then
+    key="${BASH_REMATCH[1]}"
+  else
+    # last whitespace-separated token
+    key="${raw##* }"
+  fi
+  key="$(echo "$key" | tr -d '[:space:]')"
+  if [[ -z "$key" ]]; then
+    return 0
+  fi
+  if [[ "$key" != "$raw" ]]; then
+    echo "Repaired corrupted API key file: $f" >&2
+    printf '%s\n' "$key" > "$f"
+    chmod 600 "$f"
+  fi
+}
+
 need_root
 echo "========================================"
 echo "  $TITLE installer"
@@ -49,13 +71,19 @@ mkdir -p "$PREFIX" "$STATE_DIR" "$CFG_DIR" /var/log
 if KEYFILE=$(detect_api_key); then
   if [[ "$KEYFILE" != "$CFG_DIR/api_key" ]]; then
     cp "$KEYFILE" "$CFG_DIR/api_key"
+    chmod 600 "$CFG_DIR/api_key"
   fi
+  sanitize_api_key_file "$CFG_DIR/api_key"
   echo "API key: $CFG_DIR/api_key"
 else
   echo
   echo "PasarGuard API key not found."
   echo "Paste your panel API key (X-API-Key), then Enter:"
   read -r KEY
+  KEY="$(echo "$KEY" | tr -d '[:space:]')"
+  if [[ "$KEY" =~ (pg_key_[0-9a-fA-F-]+) ]]; then
+    KEY="${BASH_REMATCH[1]}"
+  fi
   if [[ -z "$KEY" ]]; then
     echo "API key required."
     exit 1

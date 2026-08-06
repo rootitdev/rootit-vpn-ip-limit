@@ -174,10 +174,10 @@ def handle_text(token, cfg, state, key, chat_id, text: str):
 def _send_diag(token, cfg, key, chat_id):
     M = UI.MSG
     support = B.SUPPORT
-    send(token, chat_id, M["diag_head"].format(support=support))
     report = C.diagnostics_report(cfg, key)
     C.blog(f"DIAG chat={chat_id} bytes={len(report)}")
-    send(token, chat_id, report, main_menu_kb())
+    body = M["diag_head"].format(support=support) + "\n\n" + report
+    send(token, chat_id, body, main_menu_kb())
 
 
 def handle_callback(token, cfg, state, key, cq):
